@@ -6,12 +6,16 @@ Renders the same pixel-art tamagotchi from the web app onto the
 Seeed Studio 104990802 (ST7789 240x280) SPI screen.
 
 Polls the Next.js server for state and updates the display.
+Button press records audio via microphone, transcribes via the server
+(Whisper), and sends the transcription to /api/listen.
+LED strip shows a colour animation for each tamagotchi state.
 
 Usage:
     python3 client.py --server http://192.168.1.XX:3000 --user elisa
 
-Dependencies (install on Pi):
-    pip3 install adafruit-circuitpython-rgb-display Pillow requests
+Extra dependencies (install on Pi):
+    pip3 install adafruit-circuitpython-rgb-display adafruit-circuitpython-neopixel
+    pip3 install Pillow requests sounddevice numpy gpiozero
 """
 
 import time
@@ -19,17 +23,35 @@ import math
 import argparse
 import sys
 import threading
+import colorsys
+import os
+import wave
+import tempfile
+import subprocess
 
 import board
 import digitalio
 from PIL import Image, ImageDraw
 import adafruit_rgb_display.st7789 as st7789
+import neopixel
+from gpiozero import Button
 
 try:
     import requests
 except ImportError:
     print("Install requests: pip3 install requests")
     sys.exit(1)
+
+try:
+    import sounddevice as sd
+    import numpy as np
+    _AUDIO_AVAILABLE = True
+except ImportError:
+    print("WARNING: sounddevice/numpy not found – button recording disabled.")
+    print("         pip3 install sounddevice numpy")
+    _AUDIO_AVAILABLE = False
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------- Screen setup ----------
 SCREEN_W, SCREEN_H = 240, 280
@@ -49,6 +71,72 @@ disp = st7789.ST7789(
     height=SCREEN_H,
     rotation=0,
 )
+
+# ---------- LED strip setup ----------
+NUM_PIXELS = 30
+BUTTON_PIN = 26          # BCM numbering — same as led_strip_test.py
+LED_DATA_PIN = board.D13  # GPIO13 physical pin 33
+
+pixels = neopixel.NeoPixel(
+    LED_DATA_PIN,
+    NUM_PIXELS,
+    brightness=0.25,
+    auto_write=False,  # manual show() for batched updates
+)
+
+
+# ---------- LED animation functions (one per tamagotchi state) ----------
+
+def _hsv(h, s=1.0, v=0.6):
+    """Return (R,G,B) tuple 0-255 for the given HSV values."""
+    r, g, b = colorsys.hsv_to_rgb(h % 1.0, s, v)
+    return (int(r * 255), int(g * 255), int(b * 255))
+
+
+def led_update(state, t):
+    """Compute and write one LED frame for *state* at time *t* seconds."""
+    if state == "idle":
+        # Solid red, no animation.
+        pixels.fill((180, 0, 0))
+
+    elif state == "listen":
+        # Cyan breathing — microphone is active.
+        level = int(80 + abs(math.sin(t * 2.5)) * 175)
+        pixels.fill((0, level // 4, level))
+
+    elif state == "wave":
+        # Rainbow travelling chase — joyful wave.
+        offset = (t * 0.35) % 1.0
+        for i in range(NUM_PIXELS):
+            pixels[i] = _hsv((i / NUM_PIXELS + offset) % 1.0)
+
+    elif state == "think":
+        # Slow blue-purple breathing — processing.
+        level = int(30 + abs(math.sin(t * 1.0)) * 150)
+        b = level
+        r = level // 5
+        pixels.fill((r, 0, b))
+
+    elif state == "dating":
+        # Pink/red heartbeat pattern — love!
+        BEAT = (0.08, 0.35, 0.14, 0.40, 0.10, 0.10, 0.10, 0.10)
+        level = BEAT[int(t * 5) % len(BEAT)]
+        pixels.fill((int(255 * level), int(20 * level), int(80 * level)))
+
+    elif state == "interact":
+        # Fast warm orange/yellow spark chase.
+        COLORS = [(255, 80, 0), (255, 180, 0), (200, 40, 0)]
+        offset = int(t * 15) % NUM_PIXELS
+        pixels.fill((0, 0, 0))
+        for i in range(NUM_PIXELS):
+            if (i + offset) % 5 in (0, 1):
+                pixels[i] = COLORS[(i + offset) % len(COLORS)]
+
+    else:
+        pixels.fill((0, 0, 0))
+
+    pixels.show()
+
 
 # ---------- Tamagotchi data (mirrored from Tamagotchi.tsx) ----------
 
@@ -425,6 +513,163 @@ def render_frame(sprites, palette, blink=False, y_offset=0, x_offset=0, rotation
     return img
 
 
+# ---------- Audio recording + transcription ----------
+
+SAMPLE_RATE = 16000   # Hz — Whisper prefers 16 kHz
+MAX_RECORD_SECS = 10  # Maximum hold-to-record duration
+
+# Shared containers updated by button callbacks and the recording thread
+_record_stop = threading.Event()
+_record_stop.set()  # starts in "not recording" state
+_override = {"state": None}  # local state override (None = use server state)
+_override_lock = threading.Lock()
+
+
+def _set_override(s):
+    with _override_lock:
+        _override["state"] = s
+
+
+def _clear_override():
+    with _override_lock:
+        _override["state"] = None
+
+
+_HEARTBEAT_FILES = ["heartbeat05.mp3", "heartbeat1.mp3", "heartbeat15.mp3"]
+
+
+def _play_heartbeat_sequence():
+    """Play the three heartbeat MP3 files in order, waiting for each to finish."""
+    for filename in _HEARTBEAT_FILES:
+        filepath = os.path.join(_SCRIPT_DIR, filename)
+        if not os.path.isfile(filepath):
+            print(f"[audio] Missing: {filepath}")
+            continue
+        print(f"[audio] Playing {filename}")
+        try:
+            subprocess.run(["mpg123", filepath], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            # mpg123 not installed, try aplay with ffmpeg pipe as fallback
+            try:
+                subprocess.run(["ffplay", "-nodisp", "-autoexit", filepath],
+                               check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception as e:
+                print(f"[audio] Playback failed for {filename}: {e}")
+                break
+        except Exception as e:
+            print(f"[audio] Playback failed for {filename}: {e}")
+            break
+    print("[audio] Heartbeat sequence done")
+
+
+def _do_recording(server_url, user_id):
+    """Record audio while the button is held, then transcribe + process."""
+    if not _AUDIO_AVAILABLE:
+        return
+
+    print("[mic] Recording started")
+    chunks = []
+
+    try:
+        with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16") as stream:
+            while not _record_stop.is_set():
+                chunk, _ = stream.read(1024)
+                chunks.append(chunk.copy())
+                if len(chunks) * 1024 / SAMPLE_RATE >= MAX_RECORD_SECS:
+                    break
+    except Exception as e:
+        print(f"[mic] Recording error: {e}")
+        _clear_override()
+        return
+
+    if not chunks:
+        _clear_override()
+        return
+
+    audio_data = np.concatenate(chunks, axis=0)
+    print(f"[mic] Recorded {len(audio_data) / SAMPLE_RATE:.1f}s")
+
+    # Switch to "think" (purple breathing) while the server transcribes
+    _set_override("think")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp_path = f.name
+        with wave.open(tmp_path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # int16 = 2 bytes
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(audio_data.tobytes())
+
+        # POST audio to /api/transcribe — server runs Whisper and returns text
+        with open(tmp_path, "rb") as f:
+            resp = requests.post(
+                f"{server_url}/api/transcribe",
+                files={"audio": ("audio.wav", f, "audio/wav")},
+                timeout=30,
+            )
+        resp.raise_for_status()
+        text = resp.json().get("text", "").strip()
+    except Exception as e:
+        print(f"[mic] Transcription error: {e}")
+        _clear_override()
+        return
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    if not text:
+        print("[mic] Empty transcription")
+        _clear_override()
+        return
+
+    print(f"[mic] Transcribed: {text}")
+
+    # POST the transcription text to /api/listen — same flow as pressing L in browser
+    try:
+        resp = requests.post(
+            f"{server_url}/api/listen",
+            json={"deviceId": user_id, "text": text},
+            timeout=10,
+        )
+        data = resp.json()
+        action = data.get("action")
+        print(f"[mic] Listen response: {action} — {data.get('message', '')}")
+
+        if action == "dating":
+            # /api/listen detected a dating intent — kick off the dating round
+            query = data.get("query", text)
+            _set_override("dating")
+            print(f"[mic] Starting dating: {query}")
+            try:
+                date_resp = requests.post(
+                    f"{server_url}/api/agents/date",
+                    json={"deviceId": user_id, "query": query},
+                    timeout=120,  # dating can take a while (multiple LLM calls)
+                )
+                date_data = date_resp.json()
+                summary = date_data.get("summary", "")
+                matches = date_data.get("matches", [])
+                print(f"[mic] Dating done — {summary}")
+                if matches:
+                    best = matches[0]
+                    print(f"[mic] Best match: {best.get('profileId')} (score {best.get('score')})")
+                    # Play heartbeat MP3 sequence (scent is already triggered server-side)
+                    _play_heartbeat_sequence()
+            except Exception as e:
+                print(f"[mic] Dating error: {e}")
+    except Exception as e:
+        print(f"[mic] Listen error: {e}")
+
+    # Release the override so the server-polled state takes over
+    _clear_override()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tamagotchi display for Raspberry Pi")
     parser.add_argument("--server", required=True, help="Next.js server URL, e.g. http://192.168.1.10:3000")
@@ -471,72 +716,100 @@ def main():
     poll_thread = threading.Thread(target=poller, daemon=True)
     poll_thread.start()
 
+    # ---------- Button: hold to record ----------
+    button = Button(BUTTON_PIN, pull_up=True, bounce_time=0.05)
+
+    def _on_press():
+        """Button pressed: start recording and override state to 'listen'."""
+        if not _AUDIO_AVAILABLE:
+            return
+        _set_override("listen")
+        _record_stop.clear()
+        threading.Thread(
+            target=_do_recording,
+            args=(server, user_id),
+            daemon=True,
+        ).start()
+
+    def _on_release():
+        """Button released: signal recording thread to stop."""
+        _record_stop.set()
+
+    button.when_pressed = _on_press
+    button.when_released = _on_release
+
     blink = False
     blink_timer = time.time() + 3.0
-    prev_oy = None  # Track last y offset to skip identical frames
 
     # Show initial frame
     img = render_frame(sprites, palette, blink=False, y_offset=0, x_offset=0, state="idle", t=time.time())
     disp.image(img)
-    print("Display initialized. Polling for state...")
+    print("Display initialized. Hold button to speak. Polling for state...")
 
-    while True:
-        t0 = time.time()
+    try:
+        while True:
+            t0 = time.time()
 
-        # Blink logic
-        if t0 >= blink_timer:
-            blink = True
-            blink_timer = t0 + 2.5 + (hash_str(user_id + str(int(t0))) % 2000) / 1000.0
-        if blink and t0 >= blink_timer - 2.3:
-            blink = False
+            # Blink logic
+            if t0 >= blink_timer:
+                blink = True
+                blink_timer = t0 + 2.5 + (hash_str(user_id + str(int(t0))) % 2000) / 1000.0
+            if blink and t0 >= blink_timer - 2.3:
+                blink = False
 
-        # Read state (thread-safe)
-        with state_lock:
-            cur_state = state
+            # Local override (recording/processing) takes priority over server state
+            with state_lock:
+                cur_state = state
+            with _override_lock:
+                if _override["state"]:
+                    cur_state = _override["state"]
 
-        # Animation offsets
-        x_off = 0
-        rot = 0.0
-        if cur_state == "idle":
-            y_off = math.sin(t0 * 1.2) * 8
-        elif cur_state == "wave":
-            # Match CSS: wave-bounce 0.5s — bounce up 16px + tilt ±10°
-            cycle = (t0 % 0.5) / 0.5  # 0..1 over 0.5s
-            if cycle < 0.25:
-                # 0% → 25%: go up + tilt left
-                p = cycle / 0.25
-                y_off = -16 * p
-                rot = -10 * p
-            elif cycle < 0.75:
-                # 25% → 75%: stay up, tilt left → right
-                p = (cycle - 0.25) / 0.5
-                y_off = -16
-                rot = -10 + 20 * p
+            # Update LED strip
+            led_update(cur_state, t0)
+
+            # Animation offsets
+            x_off = 0
+            rot = 0.0
+            if cur_state == "idle":
+                y_off = math.sin(t0 * 1.2) * 8
+            elif cur_state == "wave":
+                # Match CSS: wave-bounce 0.5s — bounce up 16px + tilt ±10°
+                cycle = (t0 % 0.5) / 0.5  # 0..1 over 0.5s
+                if cycle < 0.25:
+                    p = cycle / 0.25
+                    y_off = -16 * p
+                    rot = -10 * p
+                elif cycle < 0.75:
+                    p = (cycle - 0.25) / 0.5
+                    y_off = -16
+                    rot = -10 + 20 * p
+                else:
+                    p = (cycle - 0.75) / 0.25
+                    y_off = -16 * (1 - p)
+                    rot = 10 * (1 - p)
+            elif cur_state == "listen":
+                y_off = math.sin(t0 * 2.0) * 3
+            elif cur_state == "think":
+                y_off = math.sin(t0 * 0.8) * 6
+            elif cur_state == "dating":
+                y_off = math.sin(t0 * 0.8) * 4
+            elif cur_state == "interact":
+                y_off = abs(math.sin(t0 * 3.0)) * -10
             else:
-                # 75% → 100%: come down + tilt back to 0
-                p = (cycle - 0.75) / 0.25
-                y_off = -16 * (1 - p)
-                rot = 10 * (1 - p)
-        elif cur_state == "listen":
-            y_off = math.sin(t0 * 2.0) * 3
-        elif cur_state == "think":
-            y_off = math.sin(t0 * 0.8) * 6
-        elif cur_state == "dating":
-            y_off = math.sin(t0 * 0.8) * 4
-        elif cur_state == "interact":
-            y_off = abs(math.sin(t0 * 3.0)) * -10
-        else:
-            y_off = 0
+                y_off = 0
 
-        # Render and display
-        img = render_frame(sprites, palette, blink=blink, y_offset=y_off, x_offset=x_off, rotation=rot, state=cur_state, t=t0)
-        disp.image(img)
+            # Render and display
+            img = render_frame(sprites, palette, blink=blink, y_offset=y_off, x_offset=x_off, rotation=rot, state=cur_state, t=t0)
+            disp.image(img)
 
-        # Frame rate control
-        elapsed = time.time() - t0
-        sleep_time = frame_time - elapsed
-        if sleep_time > 0:
-            time.sleep(sleep_time)
+            # Frame rate control
+            elapsed = time.time() - t0
+            sleep_time = frame_time - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+    finally:
+        pixels.fill((0, 0, 0))
+        pixels.show()
 
 
 if __name__ == "__main__":

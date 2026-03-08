@@ -131,8 +131,11 @@ Respond with ONLY valid JSON:
 }
 
 export async function POST(req: NextRequest) {
+  let deviceId: string | undefined;
   try {
-    const { deviceId, query } = await req.json();
+    const body = await req.json();
+    deviceId = body.deviceId;
+    const query = body.query;
     if (!deviceId || !query) {
       return NextResponse.json(
         { error: "Missing deviceId or query" },
@@ -260,9 +263,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Remove activity when done
-    await removeActivity(deviceId);
-
     return NextResponse.json({
       matches,
       summary:
@@ -273,5 +273,10 @@ export async function POST(req: NextRequest) {
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : "Dating failed";
     return NextResponse.json({ error: msg }, { status: 500 });
+  } finally {
+    // Always clean up the activity, even if the dating route crashed mid-run.
+    // Without this, a server crash leaves a stale "dating" entry that freezes
+    // the Pi display (and browser) in the dating state forever.
+    await removeActivity(deviceId!).catch(() => {});
   }
 }
