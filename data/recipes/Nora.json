@@ -1,0 +1,32 @@
+{
+  "userId": "Nora",
+  "description": "Name: Nora. Age: 34. Life stage: Mid-career. Places: Sydney, Australia (Residence), Montreal, Canada (Study and early career). Projects: The Melbourne Songbird Initiative. Media: reading: 'The Overstory' by Richard Powers, 'Sapiens: A Brief History of Humankind' by Yuval Noah Harari; watching: 'Our Planet' documentary series, 'Call My Agent!' TV series; gaming: 'Stardew Valley', Board game: 'Wingspan'; trading: Swap and sell rare vinyl records. Interests: intellectual: Conservation Biology, Environmental Policy; aesthetic: Photography of Natural Landscapes, Abstract Expressionism; crafts: Ceramic Pottery, Herbal Soap Making. Vision: To establish an eco-friendly sanctuary for endangered bird species in Australia.. Seeking: Funding for conservation projects, Networking with like-minded conservationists, Developing a personal brand in eco-friendly initiatives. Favorite movies: Amelie, The Grand Budapest Hotel, Into the Wild. Recent travel: New Zealand, Tasmania, Australia",
+  "scent_sequence": [
+    {
+      "scent_name": "geosmin 1%",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "sage",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "serene embrace",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "tangerine",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "lavanda ess france",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "holy basil",
+      "scent_duration": 10
+    }
+  ],
+  "justification": "The scent experience for Nora begins with 'geosmin 1%' to reflect her connection to nature and conservation biology, evoking the earthiness of the projects she is passionate about. 'Sage' follows, resonating with Nora's intellectual pursuits in environmental policy and her engagement with abstract expressionism, providing a thoughtful, introspective moment. 'Serene Embrace' represents her vision of creating a sanctuary, offering a sense of calm and purpose. 'Tangerine' adds a vibrant, fresh energy, aligning with her dynamic lifestyle and interest in establishing a personal brand. 'Lavanda ess france' mirrors the calming yet anticipatory aspects of her pursuits in conservation projects, while 'holy basil' encapsulates her joy and determination in seeking funding and networking, as well as her cultural experiences in New Zealand and Tasmania.",
+  "createdAt": "2026-03-08T04:39:24.638Z"
+}

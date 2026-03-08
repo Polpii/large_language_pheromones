@@ -22,9 +22,36 @@ export default function CompanionScreen({ deviceId }: Props) {
     stateRef.current = state;
   }, [state]);
 
+  // Push state to server so the Pi display stays in sync
+  const pushState = useCallback(
+    (s: string) => {
+      fetch("/api/user/state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId, state: s }),
+      }).catch(() => {});
+    },
+    [deviceId]
+  );
+
+  // Map internal state to tamagotchi state name and push
+  const setAndPush = useCallback(
+    (s: "idle" | "listening" | "processing" | "dating") => {
+      setState(s);
+      const tamaMap: Record<string, string> = {
+        idle: "idle",
+        listening: "listen",
+        processing: "think",
+        dating: "dating",
+      };
+      pushState(tamaMap[s] || s);
+    },
+    [pushState]
+  );
+
   const processInput = useCallback(
     async (text: string) => {
-      setState("processing");
+      setAndPush("processing");
       setTranscript(text);
       try {
         const res = await fetch("/api/listen", {
@@ -35,7 +62,7 @@ export default function CompanionScreen({ deviceId }: Props) {
         const data = await res.json();
 
         if (data.action === "dating") {
-          setState("dating");
+          setAndPush("dating");
           setResponse("");
           const matchRes = await fetch("/api/agents/date", {
             method: "POST",
@@ -47,21 +74,21 @@ export default function CompanionScreen({ deviceId }: Props) {
           setTimeout(() => {
             setResponse("");
             setTranscript("");
-            setState("idle");
+            setAndPush("idle");
           }, 3000);
         } else {
           setResponse(data.message || "Updated!");
           setTimeout(() => {
             setResponse("");
             setTranscript("");
-            setState("idle");
+            setAndPush("idle");
           }, 3000);
         }
       } catch {
         setResponse("Something went wrong.");
         setTimeout(() => {
           setResponse("");
-          setState("idle");
+          setAndPush("idle");
         }, 2000);
       }
     },
@@ -75,7 +102,7 @@ export default function CompanionScreen({ deviceId }: Props) {
       return;
     }
 
-    setState("listening");
+    setAndPush("listening");
     setTranscript("");
     setResponse("");
 
@@ -94,9 +121,9 @@ export default function CompanionScreen({ deviceId }: Props) {
       }
     };
 
-    recognition.onerror = () => setState("idle");
+    recognition.onerror = () => setAndPush("idle");
     recognition.onend = () => {
-      if (stateRef.current === "listening") setState("idle");
+      if (stateRef.current === "listening") setAndPush("idle");
     };
 
     recognitionRef.current = recognition;
@@ -105,8 +132,8 @@ export default function CompanionScreen({ deviceId }: Props) {
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
-    setState("idle");
-  }, []);
+    setAndPush("idle");
+  }, [setAndPush]);
 
   // L key handler - trigger on keyup to prevent repeat
   useEffect(() => {

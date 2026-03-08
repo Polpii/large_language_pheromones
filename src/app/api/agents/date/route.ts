@@ -7,6 +7,8 @@ import {
   type ConversationMessage,
 } from "@/lib/conversations";
 import { upsertActivity, removeActivity, type DatingActivity } from "@/lib/activity";
+import { getRecipe, recipeToPlaySequence } from "@/lib/scent";
+import { ensureBridge, playSequence } from "@/lib/scent-bridge";
 
 const MODEL = () => process.env.OPENAI_MODEL || "gpt-4o";
 
@@ -233,6 +235,30 @@ export async function POST(req: NextRequest) {
     }
 
     matches.sort((a, b) => b.score - a.score);
+
+    // 🧪 PHEROMONES: Play the best match's scent recipe on the device
+    if (matches.length > 0) {
+      const bestMatch = matches[0];
+      console.log(`[pheromones] Best match: ${bestMatch.profileId} (score: ${bestMatch.score})`);
+      const recipe = await getRecipe(bestMatch.profileId);
+      if (recipe) {
+        const sequence = recipeToPlaySequence(recipe);
+        if (sequence.length > 0) {
+          // Start bridge + play in background
+          ensureBridge().then(async (ok) => {
+            if (ok) {
+              console.log(`[pheromones] Playing scent recipe for match ${bestMatch.profileId}...`);
+              const result = await playSequence(sequence);
+              console.log(`[pheromones] Play result: ${result.message}`);
+            } else {
+              console.warn("[pheromones] Bridge not available, skipping scent playback");
+            }
+          });
+        }
+      } else {
+        console.log(`[pheromones] No recipe found for ${bestMatch.profileId}`);
+      }
+    }
 
     // Remove activity when done
     await removeActivity(deviceId);

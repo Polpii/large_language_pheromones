@@ -1,0 +1,32 @@
+{
+  "userId": "Oscar",
+  "description": "Name: Oscar. Age: 34. Life stage: Early middle adulthood. Places: Barcelona, Spain (Residence), Manchester, UK (Education), Seville, Spain (Childhood). Projects: The Otaku Photo Chronicles. Media: reading: 'The Wind-Up Bird Chronicle' by Haruki Murakami; watching: 'The Mandalorian', 'Attack on Titan'; gaming: 'The Legend of Zelda: Breath of the Wild', 'Cyberpunk 2077'; trading: Collectible Anime Figurines. Interests: intellectual: Japanese Language, Pop Culture Studies; aesthetic: Street Photography, Animation Art; crafts: Model Kit Building, Origami. Vision: Become a renowned photographer known for blending cultures through visual storytelling.. Seeking: Gallery Exhibition, Collaborations with Anime Studios. Favorite movies: Spirited Away, Interstellar, The Grand Budapest Hotel. Recent travel: Tokyo, Japan, Berlin, Germany",
+  "scent_sequence": [
+    {
+      "scent_name": "geosmin 1%",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "tangerine",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "lavanda ess france",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "holy basil",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "strawberry",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "serene embrace",
+      "scent_duration": 10
+    }
+  ],
+  "justification": "Oscar's experiences and interests are deeply rooted in diverse cultures and intellectual pursuits. The opening notes of 'geosmin 1%' capture the earthy, grounding nature of his childhood in Seville and current residence in Barcelona, reflecting his connection to these places. 'Tangerine' embodies the joy and creativity found in his endeavors in photography and art, particularly reflecting his recent travels to Tokyo, a vibrant city full of life and innovation. 'Lavanda ess france' introduces a calming presence, resonating with his educational experiences in Manchester and his intellectual pursuits in pop culture studies and Japanese language. 'Holy basil' signifies his ambitions and creativity, as he strives to blend cultures in visual storytelling and seeks collaborations. 'Strawberry' brings a sense of nostalgia and delight, reflective of his love for animation and collectible figurines, reminiscent of both 'Spirited Away' and the playful elements in his favorite media. Finally, 'serene embrace' offers a soothing closure, matching Oscar's vision of becoming a renowned photographer, and his desire for artistic collaborations, tying together his passions with a tranquil yet inspiring finish.",
+  "createdAt": "2026-03-08T04:39:33.916Z"
+}

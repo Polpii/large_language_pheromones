@@ -1,0 +1,32 @@
+{
+  "userId": "polpii",
+  "description": "Name: polpii. Age: 28. Life stage: Young Adult. Places: Paris (Birthplace), USA (Residency), Australia (Residency). Projects: Tangible Platform. Media: watching: One Piece. Interests: intellectual: Neuroscience; aesthetic: Painting; crafts: Cooking. Vision: Become a chef. Favorite movies: Harry Potter. Recent travel: Vietnam",
+  "scent_sequence": [
+    {
+      "scent_name": "lavanda ess france",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "whisper bond",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "tangerine",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "serene embrace",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "strawberry",
+      "scent_duration": 10
+    },
+    {
+      "scent_name": "myrth",
+      "scent_duration": 10
+    }
+  ],
+  "justification": "Polpii has a connection to Paris, hence 'lavanda ess france' represents their birthplace. Their interest in cooking and aim to become a chef is reflected in the dynamic and hopeful 'whisper bond'. The choice of 'tangerine' relates to the fresh and vibrant nature of culinary arts and Polpii's aspirations. 'Serene embrace' aligns with the aesthetic passion for painting, offering a calming contrast. 'Strawberry' evokes joy and creativity, akin to the imaginative world of Harry Potter and One Piece. Finally, 'myrth' connects to the cultural and diverse experience of recent travels to Vietnam, rounding off the scent journey with a touch of mystique and depth.",
+  "createdAt": "2026-03-08T04:39:42.545Z"
+}

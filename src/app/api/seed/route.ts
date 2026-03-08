@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import openai from "@/lib/openai";
 import { saveProfile, getAllProfiles } from "@/lib/profiles";
+import { generateRecipe } from "@/lib/scent";
 
 const FIRST_NAMES = [
   "Jake", "Emma", "Jordan", "Sophia", "Marcus", "Priya", "Tyler", "Chloe",
@@ -92,6 +93,14 @@ Respond with ONLY the JSON. Make it realistic and detailed.`,
           profile.metadata.subject_id = userId;
           profile.metadata.last_sync = new Date().toISOString().split("T")[0];
           await saveProfile(userId, profile);
+
+          // Generate scent recipe in background (don't block response)
+          generateRecipe(userId).then((recipe) => {
+            console.log(`[pheromones] Recipe generated for ${userId}: ${recipe.scent_sequence.length} scents`);
+          }).catch((err) => {
+            console.error(`[pheromones] Failed to generate recipe for ${userId}:`, err);
+          });
+
           return NextResponse.json({ message: `Created ${userId}`, id: userId, status: "created" });
         } catch {
           return NextResponse.json({ error: "Failed to parse profile" }, { status: 500 });
