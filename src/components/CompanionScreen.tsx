@@ -160,6 +160,29 @@ export default function CompanionScreen({ deviceId }: Props) {
     };
   }, [startListening, stopListening]);
 
+  // A key handler — display art.png on the Pi screen for 30s
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === "a" || e.key === "A") {
+        pushState("art");
+      }
+    };
+    window.addEventListener("keydown", handler, { once: true });
+    // re-register after each press
+    const reRegister = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === "a" || e.key === "A") {
+        window.addEventListener("keydown", handler, { once: true });
+      }
+    };
+    window.addEventListener("keyup", reRegister);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      window.removeEventListener("keyup", reRegister);
+    };
+  }, [pushState]);
+
   const handleTextSubmit = () => {
     if (!textInput.trim()) return;
     setShowInput(false);

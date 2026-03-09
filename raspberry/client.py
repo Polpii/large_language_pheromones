@@ -535,11 +535,126 @@ def _clear_override():
         _override["state"] = None
 
 
+# ---------- Art display mode -----------
+
+_ART_DURATION = 30  # seconds to display art.png
+
+def _show_art(disp, server_url, user_id):
+    """Load art.png and display it centered on screen for _ART_DURATION seconds, then return."""
+    art_path = os.path.join(_SCRIPT_DIR, "art.png")
+    if not os.path.isfile(art_path):
+        print(f"[art] art.png not found at {art_path}")
+        return
+
+    try:
+        art_img = Image.open(art_path).convert("RGB")
+    except Exception as e:
+        print(f"[art] Failed to load art.png: {e}")
+        return
+
+    # Scale to fit ~90% of screen height, maintain aspect ratio
+    target_h = int(SCREEN_H * 1.8)
+    target_w = int(SCREEN_W * 1.8)
+    art_w, art_h = art_img.size
+    scale = min(target_w / art_w, target_h / art_h)
+    new_w = int(art_w * scale)
+    new_h = int(art_h * scale)
+    art_img = art_img.resize((new_w, new_h), Image.LANCZOS)
+
+    # Center on black background
+    canvas = Image.new("RGB", (SCREEN_W, SCREEN_H), (0, 0, 0))
+    paste_x = (SCREEN_W - new_w) // 2
+    paste_y = (SCREEN_H - new_h) // 2
+    canvas.paste(art_img, (paste_x, paste_y))
+
+    disp.image(canvas)
+    print(f"[art] Displaying art.png for {_ART_DURATION}s")
+
+    # Wait, then tell the server we're back to idle
+    time.sleep(_ART_DURATION)
+
+    try:
+        requests.post(f"{server_url}/api/user/state",
+                       json={"deviceId": user_id, "state": "idle"}, timeout=2)
+    except Exception:
+        pass
+    print("[art] Done, returning to idle")
+
+
+# ---------- Sound playback helpers ----------
+
+_loop_stop = threading.Event()  # signal the loop thread to stop
+_loop_proc = None               # current subprocess.Popen being played
+_loop_lock = threading.Lock()
+
+
+def _play_mp3(filename):
+    """Play an MP3 file once (fire-and-forget in a thread, non-blocking)."""
+    filepath = os.path.join(_SCRIPT_DIR, filename)
+    if not os.path.isfile(filepath):
+        return
+    def _run():
+        try:
+            subprocess.run(["mpg123", filepath],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            try:
+                subprocess.run(["ffplay", "-nodisp", "-autoexit", filepath],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _play_mp3_loop(filename):
+    """Start looping an MP3 file in the background. Call _stop_loop() to end."""
+    global _loop_proc
+    _stop_loop()  # stop any previous loop first
+    filepath = os.path.join(_SCRIPT_DIR, filename)
+    if not os.path.isfile(filepath):
+        return
+    _loop_stop.clear()
+    def _run():
+        global _loop_proc
+        while not _loop_stop.is_set():
+            try:
+                proc = subprocess.Popen(["mpg123", filepath],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                try:
+                    proc = subprocess.Popen(["ffplay", "-nodisp", "-autoexit", filepath],
+                                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    break
+            except Exception:
+                break
+            with _loop_lock:
+                _loop_proc = proc
+            proc.wait()
+            with _loop_lock:
+                _loop_proc = None
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _stop_loop():
+    """Stop a looping sound — kills the running process immediately."""
+    global _loop_proc
+    _loop_stop.set()
+    with _loop_lock:
+        if _loop_proc is not None:
+            try:
+                _loop_proc.kill()
+            except Exception:
+                pass
+            _loop_proc = None
+
+
 _HEARTBEAT_FILES = ["heartbeat05.mp3", "heartbeat1.mp3", "heartbeat15.mp3"]
 
 
 def _play_heartbeat_sequence():
     """Play the three heartbeat MP3 files in order, waiting for each to finish."""
+    _stop_loop()  # Kill the dating.mp3 loop FIRST
     for filename in _HEARTBEAT_FILES:
         filepath = os.path.join(_SCRIPT_DIR, filename)
         if not os.path.isfile(filepath):
@@ -723,6 +838,7 @@ def main():
         """Button pressed: start recording and override state to 'listen'."""
         if not _AUDIO_AVAILABLE:
             return
+        _play_mp3("listen.mp3")
         _set_override("listen")
         _record_stop.clear()
         threading.Thread(
@@ -740,6 +856,7 @@ def main():
 
     blink = False
     blink_timer = time.time() + 3.0
+    prev_state = "idle"  # track state transitions for sound triggers
 
     # Show initial frame
     img = render_frame(sprites, palette, blink=False, y_offset=0, x_offset=0, state="idle", t=time.time())
@@ -764,8 +881,27 @@ def main():
                 if _override["state"]:
                     cur_state = _override["state"]
 
+            # Sound triggers on state transitions
+            if cur_state != prev_state:
+                if cur_state == "wave":
+                    _play_mp3("wave.mp3")
+                elif cur_state == "dating":
+                    _play_mp3_loop("dating.mp3")
+                # Stop dating loop when leaving dating state
+                if prev_state == "dating" and cur_state != "dating":
+                    _stop_loop()
+                prev_state = cur_state
+
             # Update LED strip
             led_update(cur_state, t0)
+
+            # Art mode: display art.png for 30s then revert to idle
+            if cur_state == "art":
+                _show_art(disp, server, user_id)
+                with state_lock:
+                    state = "idle"
+                prev_state = "idle"
+                continue
 
             # Animation offsets
             x_off = 0
@@ -808,6 +944,7 @@ def main():
             if sleep_time > 0:
                 time.sleep(sleep_time)
     finally:
+        _stop_loop()
         pixels.fill((0, 0, 0))
         pixels.show()
 

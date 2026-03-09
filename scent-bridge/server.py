@@ -132,21 +132,59 @@ def build_command_ms(scent_id: int, duration_ms: int) -> bytes:
     subcmd = bytes([0x05])
     channel = bytes([scent_id])
     padding = bytes([0x00, 0x00])
-    duration_bytes = max(1, duration_ms).to_bytes(2, "big")  # minimum 1ms, never 0
+    duration_bytes = max(0, duration_ms).to_bytes(2, "big")
     body = header + cmd_type + subcmd + channel + padding + duration_bytes
     crc_bytes = crc16_modbus(body)
     end = bytes([0x55])
     return start + body + crc_bytes + end
 
 
-async def _send_stop_all(client, used_scent_ids):
-    """Send 1ms override to all 12 channels on an existing BLE connection to stop any active scent."""
+async def _send_stop_all(client, used_scent_ids=None):
+    """Send 0ms commands to all 12 channels on an existing BLE connection to stop any active scent."""
     for ch in range(1, 13):
         try:
-            stop_cmd = build_command_ms(ch, 1)
+            stop_cmd = build_command_ms(ch, 0)
             await client.write_gatt_char(WRITE_CHAR_UUID, stop_cmd)
+            await asyncio.sleep(0.05)  # small gap between BLE writes
         except Exception as e:
             print(f"[scent-bridge] Failed to stop channel {ch}: {e}")
+
+
+async def force_stop_device():
+    """Connect to the device independently and send stop to all channels.
+    Works even when no play sequence is active.
+    Reuses the active BLE client if one is already connected."""
+    global _device_connected, _device_address_str
+    if not HAS_BLEAK:
+        return {"status": "error", "message": "bleak not installed"}
+
+    # If a play coroutine still has an active connection, reuse it
+    if _active_client is not None:
+        try:
+            if _active_client.is_connected:
+                print("[scent-bridge] Force stop -- reusing active BLE connection...")
+                await _send_stop_all(_active_client)
+                print("[scent-bridge] Force stop complete (reused connection)")
+                return {"status": "stopped", "message": "Force stop sent on existing connection"}
+        except Exception:
+            pass  # Fall through to open a new connection
+
+    addr = await find_device()
+    if not addr:
+        return {"status": "error", "message": "Device not found"}
+
+    try:
+        async with BleakClient(addr, timeout=10.0) as client:
+            if not client.is_connected:
+                return {"status": "error", "message": "Could not connect"}
+            _device_connected = True
+            _device_address_str = str(addr)
+            print("[scent-bridge] Force stop -- sending 0ms to all 12 channels...")
+            await _send_stop_all(client)
+            print("[scent-bridge] Force stop complete")
+            return {"status": "stopped", "message": "Force stop sent to all channels"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 async def play_sequence_ble(sequence):
@@ -291,18 +329,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/stop":
+            # 1) If a sequence is playing, signal it to stop
             if _is_playing and _stop_event is not None and _loop is not None:
-                # Thread-safe: set the asyncio.Event from the HTTP thread
                 _loop.call_soon_threadsafe(_stop_event.set)
-                # Wait briefly for the play coroutine to finish its stop sequence
                 import time
                 for _ in range(30):  # wait up to 3s
                     if not _is_playing:
                         break
                     time.sleep(0.1)
-                self._send_json({"status": "stopped", "message": "Stop signal sent on same BLE connection"})
-            else:
-                self._send_json({"status": "ok", "message": "Nothing playing"})
+
+            # 2) Always force-stop the device regardless of _is_playing state
+            #    This handles cases where the device hardware timer is still running
+            try:
+                result = _run_async(force_stop_device(), timeout=15)
+                self._send_json(result)
+            except Exception as e:
+                self._send_json({"status": "error", "message": str(e)})
             return
         if self.path == "/play":
             length = int(self.headers.get("Content-Length", 0))

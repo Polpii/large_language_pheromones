@@ -224,6 +224,21 @@ export default function ScentPage() {
           )}
         </div>
 
+        {/* Main Stop Button */}
+        {(isDevicePlaying || playing) && (
+          <button
+            onClick={async () => {
+              await fetch("/api/scent/stop", { method: "POST" });
+              setPlaying(null);
+              setPlayResult({ ok: true, msg: "Playback stopped" });
+              fetchStatus();
+            }}
+            className="w-full mb-8 py-4 rounded-xl bg-red-600 hover:bg-red-500 active:bg-red-700 text-white text-lg font-bold tracking-wide transition-colors shadow-[0_0_20px_rgba(239,68,68,0.3)] border border-red-500/50"
+          >
+            ■ STOP
+          </button>
+        )}
+
         {/* Play result toast */}
         {playResult && (
           <div
